@@ -1,0 +1,285 @@
+---
+title: "Winter5 冬第5周上机内容"
+author: "ChenXG 陈栩淦 3160104014"
+date: "12/18/2018"
+output: html_document
+---
+
+
+```{r}
+Sys.setlocale("LC_ALL", locale = "en_US.UTF-8")
+setwd("~/Project/RegressionAnalysis")
+```
+
+```{r}
+library(leaps)  # for leaps and regsubsets
+library(faraway)  # for Cpplot
+library(DAAG)  # for press
+```
+
+
+## 题1
+
+中国旅游业的现状分析：国内旅游市场收入$y$（亿元）收到许多因素的影响，我们选取如下的5个因素进行研究：
+
+* $x_1$：国内旅游人数（万人次）；
+* $x_2$：城镇居民平均旅游支出（元）；
+* $x_3$：乡村居民人均旅游支出（元）；
+* $x_4$：公路里程（万公里）；
+* $x_5$：铁路里程（万公里）。
+
+根据《中国统计年鉴》，我们收集了1994-2010年度数据，如下表。试做自变量选择的分析。
+
+```{r}
+y <- c(1023.5, 1375.7, 1638.4, 2112.7, 2391.2, 2831.9, 3175.5, 3522.4, 3878.4, 
+       3442.3, 4710.7, 5285.86, 6229.74, 7000.62, 8749.3, 10183.69, 12579.77)
+x1 <- c(52400, 62900, 63900, 64400, 69450, 71900, 74400, 78400, 87800, 
+        87000, 110200, 121200, 139400, 161000, 171200, 190200, 210300)
+x2 <- c(414.7, 464, 534.1, 599.8, 607, 614.8, 678.6, 708.3, 739.7, 
+        684.9, 731.8, 737.1, 766.4, 906.9, 849.4, 801.1, 833)
+x3 <- c(54.9, 61.5, 70.5, 145.7, 197, 249.5, 226.6, 212.7, 209.1,
+        200, 210.2, 227.6, 221.9, 222.5, 275.3, 295.3, 206)
+x4 <- c(111.78, 115.7, 118.58, 122.64, 127.85, 135.17, 140.27, 169.8, 176.52,
+        180.98, 187.07, 334.52, 345.7, 358.37, 373.02, 386.08, 400.83)
+x5 <- c(5.9, 5.97, 6.49, 6.6, 6.64, 6.74, 6.87, 7.01, 7.19,
+        7.3, 7.44, 7.54, 7.71, 7.8, 7.97, 8.55, 9.12)
+
+data <- data.frame(y, x1, x2, x3, x4, x5)
+
+datascale <- scale(data)
+datascale
+
+data2 <- data.frame(datascale)
+
+X <- as.matrix(data2[, 2:6])
+y <- as.matrix(data2[, 1])
+```
+
+
+### 调整后的$R^2$准则
+
+```{r}
+adjr <- leaps(X, y, int = T, method = "adjr2")
+adjr
+```
+```{r}
+adjr$which[which.max(adjr$adjr2),]
+```
+
+利用调整后的$R^2$准则，最终选择自变量子集：$\{x_1, x_2, x_3, x_4, x_5\}$.
+
+### $C_p$准则
+```{r}
+cp <- leaps(X, y, int = T, method = "Cp")
+cp
+```
+
+```{r}
+cp$which[which.min(cp$Cp), ]
+```
+
+```{r}
+Cpplot(cp)
+```
+
+根据$C_p$准则，最终选择自变量子集：$\{x_1, x_2, x_4, x_5\}$.
+
+
+### 其他准则
+
+```{r}
+calcuPress <- function(data2, var){
+  varnameList <- colnames(data2)
+  varnameList <- varnameList[- which(varnameList == "y")]
+  modelnum <- length(var[,1])
+  
+  press.f <- numeric(15)
+  for (i in 1: modelnum){
+    formu <- paste("y~", paste(varnameList[var[i,]], collapse = "+"))
+    model <- lm(formu, data = data2)
+    press.f[i] = press(model)
+  }
+  
+  return (press.f)
+}
+
+
+calcuCriteria <- function(data2){
+  nbest <- 2 ^ (length(data2[1,]) - 1) - 1
+  search.results <- regsubsets(y~., data = data2,
+                               method = "exhaustive", nbest = nbest)
+  selection.criteria <- summary(search.results)
+  
+  n <- length(data2[, 1])
+  q <- as.integer(row.names(selection.criteria$which))
+  R.sq <- selection.criteria$rsq
+  AdjR.sq <- selection.criteria$adjr2
+  rms <- selection.criteria$rss / (n - q - 1)
+  Cp <- selection.criteria$cp
+  aic.f <- n * log(selection.criteria$rss) + 2 * (q + 1)
+  bic.f <- n * log(selection.criteria$rss) + (q + 1) * log(n)
+  var <- as.matrix(selection.criteria$which[, 2:6])
+  press.f <- calcuPress(data2, var)
+  criteria.table <- data.frame(cbind(q, rms, R.sq, AdjR.sq, Cp, aic.f, bic.f, press.f,
+                                     var[,1], var[,2], var[,3], var[,4], var[,5]),
+                               row.names = NULL)
+  names(criteria.table) <- c("q", "RMS", "Rsq", "aRsq", "Cp", "AIC", "BIC", "PRESS", 
+                             "x1", "x2", "x3", "x4", "x5")
+  return (criteria.table)
+}
+
+```
+
+```{r}
+criteria.table <- calcuCriteria(data2)
+round(criteria.table, 2)
+```
+
+#### $AIC$准则
+```{r}
+criteria.table[which.min(criteria.table[,'AIC']),]
+```
+
+可以得到，根据$AIC$准则，我们选择自变量子集：$\{x_1, x_2, x_4, x_5\}$.
+
+#### $BIC$准则
+```{r}
+criteria.table[which.min(criteria.table[,'BIC']),]
+```
+
+可以得到，根据$BIC$准则，我们同样选择自变量子集：$\{x_1, x_2, x_4, x_5\}$.
+
+#### $PRESS$准则
+```{r}
+criteria.table[which.min(criteria.table[,'PRESS']),]
+```
+
+可以得到，根据$PRESS$准则，我们同样选择自变量子集：$\{x_1, x_2, x_4, x_5\}$.
+
+### 图示法的变量选择
+
+```{r}
+subsets <- regsubsets(y~., data = data2)
+summary(subsets)
+```
+
+这个结果告诉我们：如果只选择一个变量，应该选入$\{x_1\}$；若只选择两个变量，应该选入$\{x_1, x_5\}$；若选择三个变量，则应选入$\{x_1, x_2, x_5\}$；若选择四个变量，应选入$\{x_1, x_2, x_4, x_5\}$；若选入五个变量，则全部选入。
+
+
+```{r}
+plot(subsets, scale = "Cp")
+```
+
+根据$C_p$准则，最终选择自变量子集：$\{x_1, x_2, x_4, x_5\}$.
+
+```{r}
+plot(subsets, scale = "adjr2")
+```
+
+利用调整后的$R^2$准则，最终选择自变量子集：$\{x_1, x_2, x_3, x_4, x_5\}$.
+
+```{r}
+plot(subsets, scale = "bic")
+```
+
+
+可以得到，根据$BIC$准则，我们同样选择自变量子集：$\{x_1, x_2, x_4, x_5\}$.
+
+
+
+## 题2
+
+对下列数据使用前进法、后退法和逐步回归法选择自变量。
+
+数据：下表给出了我国1991-2006年猪肉价格及其影响因素的数据。在这个数据集中，$y$表示猪肉价格（元/公斤），$x_1$表示CPI，$x_2$表示人口数（亿），$x_3$表示年末存栏量（万头），$x_4$表示城镇居民可支配收入（元），$x_5$表示玉米价格（元/吨），$x_6$表示猪肉生成量（万吨）。
+
+
+```{r}
+y <- c(9.84, 10.32, 10.65, 10.49, 9.16, 10.18, 14.96, 11.81, 
+       10.77, 8.38, 8.74, 10.18, 9.85, 10.70, 13.97, 13.39, 14.03)
+x1 <- c(103.1, 103.4, 106.4, 114.7, 124.1, 117.1, 107.9, 102.8, 
+        99.2, 98.6, 100.4, 100.7, 99.2, 101.2, 103.9, 101.8, 101.5)
+x2 <- c(14.39, 12.98, 11.60, 11.45, 11.21, 10.55, 10.42, 10.06, 
+        9.14, 8.18, 7.58, 6.95, 6.45, 6.01, 5.87, 5.89, 5.28)
+x3 <- c(6241, 36965, 38421, 39300, 41462, 44169, 36284, 40035, 
+        42256, 43020, 44682, 45743, 46292, 46602, 48189, 50335, 49441)
+x4 <- c(1510.2, 1700., 2026.6, 2577.4, 3496.2, 4283.0, 4838.9, 5160.3,  
+        5425.1, 5854.0, 6280.0, 6859.6, 7702.8, 8472.2, 9421.6, 10493.0, 13172.0)
+x5 <- c(686.7, 590.0, 625.0, 726.7, 1004.2, 1576.7, 1481.7, 1150.8,
+        1269.2, 1092.5, 887.5, 1060.0, 1033.3, 1087.5, 1288.3, 1229.2, 1280.0)
+x6 <- c(2281, 2452, 2635, 2854, 3205, 3648, 3158, 3596, 
+        3884, 3891, 4031, 4184, 4327, 4519, 4702, 5011, 5197)
+
+data <- data.frame(y, x1, x2, x3, x4, x5, x6)
+
+datascale <- scale(data)
+datascale
+
+data2 <- data.frame(datascale)
+```
+
+### 前进法
+```{r}
+min.model <- lm(y~1, data = data2)
+fwd.model <- step(min.model, direction = "forward", scope = (~x1+x2+x3+x4+x5+x6))
+summary(fwd.model)
+```
+
+可以看到，前进法的结果是选入了$x_5$，得到的回归方程是
+$$
+\hat{v} = -1.380\times 10^{-16} + 0.5063 \times x_5^*,
+$$
+即
+$$
+\frac{\hat{y} - 11.024706}{1.942930} =  -1.380\times 10^{-16} + 0.5063 \times \frac{x_5 - 1062.90}{287.422563},
+$$
+即
+$$
+\hat{y} = 0.003422506 * x_5 + 7.386924.
+$$
+
+### 后退法
+```{r}
+full.model <- lm(y~., data = data2)
+bwd.model <- step(full.model, direction = "backward")
+summary(bwd.model)
+```
+
+
+
+可以看到，后退法的结果是逐步剔除了$x_3$，$x_1$，$x_2$，最终选入$x_4$，$x_5$，$x_6$。得到的回归方程为
+
+
+$$
+\hat{v} = 4.431\times 10^{-16} + 2.706 \times x_4^* + 0.5531\times x_5^* - 2.585\times x_6^*,
+$$
+即
+\begin{align}
+\frac{\hat{y} - 11.024706}{1.942930} & = 2.706 \times \frac{x_4 - 5839.617647}{3264.302485} + 0.5531\times \frac{x_5 - 1062.90}{287.422563} \\
+& - 2.585\times \frac{x_6- 3739.705882}{879.925122} + 4.431\times 10^{-16},
+\end{align}
+
+即
+$$
+\hat{y} = 0.001610625 \times x_4 + 0.003738866 \times x_5 - 0.005707843 \times x_6 + 18.99089.
+$$ 
+
+
+
+### 逐步回归法
+```{r}
+min.model <- lm(y~1, data = data2)
+step.model <- step(min.model, direction = "both", scope = (~x1+x2+x3+x4+x5+x6))
+summary(step.model)
+```
+
+可以看到，逐步回归法得到的结果是选入了$x_5$，得到的回归方程与前进法一样，为
+$$
+\hat{v} = -1.380\times 10^{-16} + 0.5063 \times x_5^*,
+$$
+
+也就是
+$$
+\hat{y} = 0.003422506 * x_5 + 7.386924.
+$$
+

@@ -1,0 +1,78 @@
+---
+title: "Autumn5 秋第5周上机内容"
+author: "ChenXG 陈栩淦 3160104014"
+date: "12/17/2018"
+output: html_document
+---
+
+
+```{r}
+Sys.setlocale("LC_ALL", locale = "en_US.UTF-8")
+setwd("~/Project/RegressionAnalysis")
+```
+
+
+
+## 题目
+
+在动物学研究中，有时需要找出某种动物的体积与重量的关系，因为重量相对容易测量，而测量体积比较困难。我们可以利用重量预测体积的值。
+下面是某种动物的18个随机样本的体重$x$（单位：$kg$）与体积$y$（单位$10^{-3}m^{3}$）的数据。
+
+
+
+
+```{r}
+# loading data
+x <- c(17.1, 10.5, 13.8, 15.7, 11.9, 10.4,
+       15.0, 16.0, 17.8, 15.8, 15.1, 12.1,
+       18.4, 17.1, 16.7, 16.5, 15.1, 15.1)
+
+y <- c(16.7, 10.4, 13.5, 15.7, 11.6, 10.2,
+       14.5, 15.8, 17.6, 15.2, 14.8, 11.9, 
+       18.3, 16.7, 16.6, 15.9, 15.1, 14.5)
+
+data <- data.frame(y, x)
+```
+
+
+## （1）画出散点图。
+
+```{r}
+# 散点图
+plot(y~x, data = data)
+```
+
+##（2）求回归直线$\hat{y} = \hat{\beta_0} + \hat{\beta_1} x，并画出回归直线的图像。
+
+```{r}
+# 线性回归
+lm.sol <- lm(y~x, data = data)
+summary(lm.sol)
+lm.sol$coefficients
+```
+
+
+我们可以得到回归方程：
+\begin{equation}
+y =  0.9880519\times x -0.1040461.
+\end{equation}
+
+
+```{r}
+plot(y~x, data = data)
+abline(lm.sol)
+```
+
+
+## （3）对体重$x_0$ = 15.3的这种动物，预测它的体积$y_0$。
+
+```{r}
+newdata <- data.frame(x = c(15.3))
+y_pred <- predict(lm.sol, newdata = newdata)
+print('the prediction of x0 = 15.3 is:')
+print(y_pred[1])
+```
+
+
+
+

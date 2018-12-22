@@ -1,0 +1,818 @@
+---
+title: "Final Project For Regression Analysis"
+author: "ChenXG 陈栩淦 3160104014"
+date: "12/19/2018"
+output: 
+  html_document: 
+    keep_md: false
+    toc: true
+    toc_float: true
+    number_sections: true
+    df_print: default
+  pdf_document:
+    latex_engine: xelatex
+    includes:
+      in_header: header.tex
+    keep_tex: true
+    toc: true
+    number_sections: true
+    df_print: paged
+---
+
+
+首先，在本报告中所有带有随机性的过程均设随机种子为123.
+
+```{r, results = "hide"}
+set.seed(123)
+rm(list = ls())
+Sys.setlocale("LC_ALL", locale = "en_US.UTF-8")
+setwd("~/Project/RegressionAnalysis")
+```
+
+```{r, results = "hide"}
+library(reshape2)  # for melt
+library(GGally)  # for ggpairs
+library(car)  # for outlierTest
+library(DAAG)  # for vif, eigen and kappa
+library(leaps)  # for leaps and regsubsets
+library(DAAG)  # for press
+library(SignifReg)  # for SignifReg
+library(boot)  # for lm.boot and cv.glm
+library(MASS)  # for lm.ridge
+library(glmnet) # for glmnet and cv.glmnet
+library(ggplot2)
+```
+
+# 数据集
+
+## 数据说明及来源
+
+本报告所用数据为King County（包括Seattle）的房屋销售价格，其中包括了从2014年5月到2015年5月的房屋销售情况，总共有21613个样本点。其中
+
+数据来源为Kaggle/Datasets/House Sales in King County, USA, 网址为https://www.kaggle.com/harlfoxem/housesalesprediction。
+
+下面为该数据集的描述。
+
+> * Overview
+>
+> This dataset contains house sale prices for King County, 
+> which includes Seattle. 
+> It includes homes sold between May 2014 and May 2015.
+> 
+> It's a great dataset for evaluating simple regression models.
+> 
+> * about this file 
+> 
+> 19 house features plus the price and the id columns, along with 21613 observations.
+
+### 数据信息
+
+该数据包括了房屋id、销售时间和销售价格的基本信息：
+
+* id: a notation for a house
+* date: Date house was sold
+* price: Price is prediction target
+
+以及18个房屋特征features，如下：
+
+* bedrooms: Number of Bedrooms/House
+* bathrooms: Number of bathrooms/House
+* sqft_living: square footage of the home
+* sqft_lot: square footage of the lot
+* floors: Total floors (levels) in house
+* waterfront: House which has a view to a waterfront
+* view: Has been viewed
+* condition: How good the condition is ( Overall )
+* grade: overall grade given to the housing unit, based on King County grading system
+* sqft_above: square footage of house apart from basement
+* sqft_basement: square footage of the basement
+* yr_built: Built Year
+* yr_renovated: Year when house was renovated
+* zipcode: zip
+* lat: Latitude coordinate
+* long: Longitude coordinate
+* sqft_living15: Living room area in 2015(implies-- some renovations) This might or might not have affected the lotsize area
+* sqft_lot15: lotSize area in 2015(implies-- some renovations)
+
+
+## 读取数据
+
+首先读取数据，该文件“kc_house_data.csv”为直接下载得到。
+```{r}
+data <- read.csv("kc_house_data.csv", header = TRUE)
+data <- na.omit(data)
+data <- data[, -14]
+```
+
+下面查看数据结构。
+```{r}
+str(data)
+```
+
+
+下面查看数据的描述性统计特征
+```{r}
+summary(data)
+```
+
+
+### 划分训练集和测试集
+
+
+该数据集是从2014年5月2日到2015年5月27日的21613条数据，我们基于时间划分为训练集和测试集。
+其中训练集作为回归拟合的数据，测试集作为测试数据。
+我们选取其中2015年1月1日之前的数据作为训练集，2015年1月1日之后的数据作为测试集。
+并在训练集中随机抽取200个样本点、测试集中随机抽取100个样本点作为我们回归分析的数据。
+
+
+```{r}
+data$date <- as.Date(data$date, format = "%Y%m%dT000000")
+data.trans <- data[data$date < as.Date("20150101", format="%Y%m%d"), ]
+data.test <- data[data$date >= as.Date("20150101", format="%Y%m%d"), ]
+
+data.trans <- data.trans[, c(-1, -2)]
+data.test <- data.test[, c(-1, -2)]
+```
+
+```{r}
+set.seed(123)
+
+n.trans <- length(data.trans[, 1])
+data.trans <- data.trans[sample(1:n.trans, 200), ]
+rownames(data.trans) <- 1:200
+
+n.test <- length(data.test[, 1])
+data.test <- data.test[sample(1:n.test, 100), ]
+rownames(data.test) <- 1:100
+
+data <- rbind(data.trans, data.test)
+```
+
+
+## 数据特征
+
+
+
+下面查看18个features之间的协方差关系。
+```{r}
+cormat <- cor(data[, 2:18])
+cormat[lower.tri(cormat)]<- NA
+melted_cormat <- melt(cormat, na.rm = TRUE)
+
+ggplot(data = melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+   name="Pearson\nCorrelation") +
+  theme_minimal()+ 
+ theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 8, hjust = 1))+
+ coord_fixed()
+```
+
+
+
+
+
+# 案例分析
+
+
+## 回归诊断
+
+
+### 模型的诊断
+
+首先进行下面模型的拟合和诊断：
+$$
+Price = X\beta  + \varepsilon
+$$
+
+其中，$\beta$包括了上述提到的18个特征。
+
+
+```{r}
+lm.sol <- lm(price~., data = data.trans)
+summary(lm.sol)
+plot(lm.sol, which = 1)
+```
+
+从残差图看出，这是一个喇叭型残差图，是方差齐性不符合的一个症状。
+我们考虑对因变量$price$作变换，尝试$z = log(y)$,得到回归方程
+$$
+z = X\beta +\varepsilon
+$$
+```{r}
+z <- log(data.trans[, 'price'])
+data2.trans <- data.frame(z, data.trans[, - 1])
+z <- log(data.test[, 'price'])
+data2.test <- data.frame(z, data.test[, - 1])
+
+lm.sol2 <- lm(z~., data = data2.trans)
+summary(lm.sol2)
+plot(lm.sol2, which = 1)
+```
+
+新的残差图不呈现任何明显的规则性，这表明我们的变化是合适的。
+
+```{r}
+plot(lm.sol2, which = 2)
+```
+
+通过残差图和QQ图，我们接受线性假设、方差齐性假设、不相关性假设和正态性假设。
+
+
+
+### 数据的诊断
+
+#### 异常点诊断
+
+```{r}
+y.fit <- predict(lm.sol2)
+e.hat <- residuals(lm.sol2)
+e.std <- rstandard(lm.sol2)
+```
+
+```{r}
+plot(e.std~y.fit)
+text(y.fit, e.std)
+```
+可以看到，其中有着许多数据的学生化残差是大于2的，我们将其打印出来。
+```{r}
+point.abnormal <- abs(e.std) > 2
+point.abnormal <- (1:200)[point.abnormal]
+point.abnormal
+```
+
+我们剔除学生化残差$|r_i| > 2$的异常点数据。
+```{r}
+data2.trans <- data2.trans[-c(point.abnormal),]
+```
+
+
+#### 强影响点诊断
+
+综合cook距离，我们将$D_i > 0.01$的数据，作为强影响点，将其打印出来如下。
+```{r}
+influ.mea <- influence.measures(lm.sol2)
+
+point.influ <- influ.mea$infmat[, 'cook.d'] > 0.01
+point.influ <- (1:200)[point.influ]
+point.influ
+```
+
+
+
+### 多重共线性诊断
+
+下面我们做多重共线性诊断。
+```{r}
+# VIF
+vif(lm.sol2)
+```
+
+可以看到没有任何一个变量的VIF值大于10，因此不存在着多重共线性。
+
+```{r}
+# 特征根诊断法
+rho <- cor(data.trans[, -1])
+eigen(rho)$values
+```
+
+再看特征根诊断法，其中没有特征根近似为零，则有不存在多重共线性关系。
+
+```{r}
+# 条件数诊断法
+kappa(rho, exact = TRUE)
+```
+
+最后看条件数诊断法，CI小于100，则可以认为没有多重共线性。
+
+* 结论：数据集不存在多重共线性。
+
+
+## 线性回归
+
+### 线性回归
+
+我们将回归诊断后的模型和数据标准化，重新运行一次模型。
+```{r}
+data2.trans.scale <- scale(data2.trans)
+
+data3.trans <- data.frame(data2.trans.scale)
+```
+
+```{r}
+lm.sol3 <- lm(z~., data = data3.trans)
+summary(lm.sol3)
+plot(lm.sol3, which = 1)
+```
+
+
+#### 对回归方程的显著性作检验（显著性水平$\alpha = 0.05$）
+
+
+可以看到，$F_H = 69.09$, p值小于$2.2\times 10 ^{-6} < 0.05$, 所以我们认为回归自变量对因变量有着显著的线性影响。
+
+
+#### 对每一个回归系数的显著性作检验（显著性水平$\alpha = 0.05$）
+
+可以看到，bedrooms、bathrooms、sqft_lot、sqft_above、zipcode、long、sqft_lot15的p值均大于0.05，我们接受对应自变量的显著性假设。因此我们需要进行变量选择。
+
+### 变量选择
+
+
+
+#### 自变量选择的准则
+
+```{r}
+yname <- "z"
+varnameList <- colnames(data3.trans)
+varnameList <- varnameList[- which(varnameList == yname)]
+
+
+calcuPress <- function(data2, var, nbest, yname = "y"){
+  varnameList <- colnames(data2)
+  varnameList <- varnameList[- which(varnameList == yname)]
+  modelnum <- length(var[,1])
+  
+  press.f <- numeric(modelnum)
+  for (i in 1: modelnum){
+    formu <- paste(paste(yname, "~"), paste(varnameList[var[i,]], collapse = "+"))
+    model <- lm(as.formula(formu), data = data2)
+    press.f[i] = press(model)
+  }
+  
+  return (press.f)
+}
+
+
+nbest <- 2 ^ (length(data3.trans[1,]) - 1) - 1
+print("The number of submodel")
+print(nbest)
+formu <- paste(yname, "~.")
+search.results <- regsubsets(as.formula(formu), data = data3.trans,
+                             method = "exhaustive", nbest = nbest,
+                             really.big = T)
+selection.criteria <- summary(search.results)
+
+n <- length(data3.trans[, 1])
+q <- as.integer(row.names(selection.criteria$which))
+R.sq <- selection.criteria$rsq
+AdjR.sq <- selection.criteria$adjr2
+rms <- selection.criteria$rss / (n - q - 1)
+Cp <- selection.criteria$cp
+aic.f <- n * log(selection.criteria$rss) + 2 * (q + 1)
+bic.f <- n * log(selection.criteria$rss) + (q + 1) * log(n)
+var <- as.matrix(selection.criteria$which[, 2: length(data3.trans[1,]) ])
+press.f <- calcuPress(data3.trans, var, nbest, yname = yname)
+criteria.table <- data.frame(cbind(q, rms, R.sq, AdjR.sq, Cp, aic.f, bic.f, press.f), var)
+```
+
+
+* 调整后的$R^2$准则
+可以得到，根据调整后的$R^2$准则，我们选择以下自变量子集：
+```{r}
+var.AdjR.sq <- criteria.table[which.max(criteria.table[,'AdjR.sq']), ]
+varnameList[as.matrix(var.AdjR.sq[1, 9:25])[1, ]]
+```
+
+
+* $Cp$准则
+可以得到，根据$Cp$准则，我们选择以下自变量子集：
+```{r}
+var.Cp <- criteria.table[which.min(criteria.table[,'Cp']),]
+varnameList[as.matrix(var.Cp[1, 9:25])[1, ]]
+```
+
+
+* $AIC$准则
+可以得到，根据$AIC$准则，我们选择以下自变量子集：
+```{r}
+var.aic.f <- criteria.table[which.min(criteria.table[,'aic.f']),]
+varnameList[as.matrix(var.aic.f[1, 9:25])[1, ]]
+```
+
+
+* $BIC$准则
+可以得到，根据$BIC$准则，我们同样选择以下自变量子集：
+```{r}
+var.bic.f<- criteria.table[which.min(criteria.table[,'bic.f']),]
+varnameList[as.matrix(var.bic.f[1, 9:25])[1, ]]
+```
+
+
+* $PRESS$准则
+可以得到，根据$PRESS$准则，我们同样选择以下自变量子集：
+```{r}
+var.press.f <- criteria.table[which.min(criteria.table[,'press.f']),]
+varnameList[as.matrix(var.press.f[1, 9:25])[1, ]]
+```
+
+
+#### 逐步回归法
+
+我们使用$SignifReg$函数进行逐步回归，这个函数相比于$step$函数有三个优点：
+
+* 具有更多的criterion。除了$step$函数有的$AIC$准则外，还具有$BIC$、$C_p$、$r-adj$、$p-value$等准则。
+* 在模型选择过程中，会同步进行变量回归系数的显著性检验。如若没有通过$\alpha$置信水平的检验，则不将变量选入模型中。
+* 此外，对于逐步回归法，除了从一个空模型开始之外，还能够从一个全模型开始，逐步删除变量。
+
+```{r}
+yname <- "z"
+varnameList <- colnames(data3.trans)
+varnameList <- varnameList[- which(varnameList == yname)]
+formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+step.model <- SignifReg(scope = formu, data = data3.trans, alpha = 0.05, 
+                        direction = "step_null", criterion = "AIC")
+
+yname <- "z"
+varnameList <- names(step.model$coefficients[-1])
+formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+ols.model <- lm(formu, data = data3.trans)
+summary(ols.model)
+```
+
+
+可以看到，逐步回归法得到的结果，选取了grade, lat, sqft_living, yr_built, waterfront, sqft_living15, floors共7个自变量。得到的回归方程为：
+\begin{align}
+z^* = & 0.4179\ grade^* + 0.3533\ lat^* + 0.2242\ sqft\_living ^* \\
+& + -0.2776\ yr\_built^* + 0.1641\ waterfront^* + 0.246\ sqft\_living15^* \\
+& + 0.1193\ floors^*
+\end{align}
+
+上述方程是经过标准化后的，我们将其还原成原来的系数，如下：
+\begin{align}
+z = & 4.5396\ grade + 35.7958\ lat + 0.0033\ sqft\_living \\
+& + -0.1177\ yr\_built + 20.7789\ waterfront + 0.0047 sqft\_living15 \\
+& + 2.8302\ floors -1513.858
+\end{align}
+
+即：
+\begin{align}
+\log{(y)} = & 4.5396\ grade + 35.7958\ lat + 0.0033\ sqft\_living \\
+& + -0.1177\ yr\_built + 20.7789\ waterfront + 0.0047 sqft\_living15 \\
+& + 2.8302\ floors -1513.858
+\end{align}
+
+
+
+
+
+## 主成分回归
+由于上述线性回归过程中，我们可以看到自变量个数较多，下面尝试主成分回归方法。
+
+```{r}
+yname <- "z"
+varnameList <- colnames(data3.trans)
+varnameList <- varnameList[- which(varnameList == yname)]
+formu <- as.formula(paste("~", paste(varnameList, collapse = "+")))
+
+y.pr <- princomp(formu, data = data3.trans, cor = TRUE)
+summary(y.pr)
+```
+
+可以看到，前9个主成分的Cumulative Proportion达到了0.87491282，我们可以只选取前9个主成分，删除后8个主成分。
+
+下面为前九个主成分对应的标准正交化特征向量：
+```{r}
+y.pr$loadings[, 1:9]
+```
+
+
+计算主成分得分，进行主成分估计：
+
+```{r}
+pre = predict(y.pr)
+z <- data3.trans$z
+data3.trans.pc <- data.frame(z, pre[, 1:9])
+
+pc.sol <- lm(z~., data = data3.trans.pc)
+summary(pc.sol)
+```
+
+可以看到，有第4、第8个主成分没有通过单变量回归系数的显著性检验，我们再次进行变量选择：
+
+```{r}
+yname <- "z"
+varnameList <- colnames(data3.trans.pc)
+varnameList <- varnameList[- which(varnameList == yname)]
+formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+step.model.pc <- SignifReg(scope = formu, data = data3.trans.pc, alpha = 0.05, 
+                           direction = "step_null", criterion = "r-adj")
+
+yname <- "z"
+varnameList <- names(step.model.pc$coefficients[-1])
+formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+pc.model <- lm(formu, data = data3.trans.pc)
+summary(pc.model)
+```
+
+
+最终，我们可以得到第1、2、3、6、7、9个主成分选入模型，它们的累计贡献值达到了0.6817959，回归模型如下：
+\begin{align}
+z^* = & 0.2773\ Comp.1 + -0.314\ Comp.3 + -0.3369\ Comp.6 \\
+& + 0.2108\ Comp.2 + -0.231\ Comp.7 + -0.135\ Comp.9
+\end{align}
+
+也就是
+\begin{align}
+z^* = & 1.7626\ bedrooms^* + 1.244\ bathrooms^* + 0.3888\ sqft\_living^* \\
+& + 0.186\ sqft_lot^* + 0.9191\ floors^* -0.776\ waterfront^* \\
+& -0.7024\ view^* -0.3198\ condition^* -0.2675\ grade^* \\
+& + 0.3662\ sqft\_above^* + 0.71\ yr\_built^* + 0.5819\ yr\_renovated^* \\
+& + 0.0634\ zipcode^* -0.9196\ lat^* -0.1973\ long^*  \\
+& -0.3737\ sqft\_living15^* -0.2022\ sqft\_lot15^*
+\end{align}
+
+即
+\begin{align}
+\log{(y)} = & 21.9432\ bathrooms + 0.0057\ sqft\_living + 0.0001 sqft\_lot \\
+& + 21.8017\ floors -98.241\ waterfront -10.4364\ view \\
+& -5.9259\ condition -2.9055\ grade + 0.0059\ sqft\_above \\
+& + 0.3011\ yr\_built + 0.0187\ yr\_renovated + 0.0151\ zipcode\\
+& -93.1814\ lat -16.9743\ long -0.0072\ sqft\_living15 \\
+& -0.0001\ sqft\_lot15 + 254.5485
+\end{align}
+
+
+
+## 岭回归
+下面我们用岭估计的方法寻找岭回归方程。
+
+
+```{r}
+yname <- "z"
+varnameList <- colnames(data3.trans)
+varnameList <- varnameList[- which(varnameList == yname)]
+formu <- as.formula(paste(paste(yname, "~"), paste(varnameList, collapse = "+")))
+
+rr.sol <- lm.ridge(formu, data = data3.trans, 
+                   lambda = c(seq(0, 1000, by = 1)))
+plot(rr.sol)
+```
+
+可以看到，岭回归的方法需要较大的$\lambda$才能够使得岭迹图趋于平稳。我们选取$\lambda = 400$进行分析。
+
+```{r}
+yname <- "z"
+varnameList <- colnames(data3.trans)
+varnameList <- varnameList[- which(varnameList == yname)]
+formu <- as.formula(paste(paste(yname, "~"), paste(varnameList, collapse = "+")))
+
+ridge.model <- lm.ridge(formu, data = data3.trans, 
+                        lambda = 400)
+ridge.model
+```
+
+
+## 预测
+
+### 测试集数据变换
+
+首先对测试集数据，做与训练集一样的scale变换。
+
+```{r}
+data2.trans.scale.center <- attr(data2.trans.scale,"scaled:center")
+data2.trans.scale.scale <- attr(data2.trans.scale,"scaled:scale")
+
+data2.test <- data.test
+for (i in colnames(data.test)){
+  data2.test[i] <- (data.test[i] - data2.trans.scale.center[i]) / data2.trans.scale.scale[i]
+}
+data2.test <- data2.test[-1]
+
+y.test <- data.test$price
+y.center <- data2.trans.scale.center["z"]
+y.scale <- data2.trans.scale.scale["z"]
+y.log.test <- (log(y.test) - y.center) / y.scale
+```
+
+### 使用线性回归模型进行预测
+
+```{r}
+ypred.log.ols <- predict(ols.model, newdata = data2.test)
+ypred.ols <- exp(ypred.log.ols * y.scale + y.center) 
+res.ols <- y.log.test - ypred.log.ols
+mse.ols <- mean(res.ols^2)
+mse.ols
+
+ggplot(data.frame(res.ols, 1:100), aes(x = 1:100, y=res.ols)) +
+  geom_point(size=3, shape=21, color = "red") +
+  ggtitle("The residuals of test set using lm")
+```
+
+### 使用主成分回归模型进行预测
+
+```{r}
+data2.test.pc <- data.frame(predict(y.pr, newdata = data2.test))
+ypred.log.pc <- predict(pc.model, newdata = data2.test.pc)
+ypred.pc <- exp(ypred.log.pc * y.scale + y.center)
+res.pc <- y.log.test - ypred.log.pc
+mse.pc <- mean(res.pc^2)
+mse.pc
+
+ggplot(data.frame(res.pc, 1:100), aes(x = 1:100, y=res.pc)) +
+  geom_point(size=3, shape=21, color = "blue") +
+  ggtitle("The residuals of test set using PCA")
+```
+
+### 使用岭回归模型进行预测
+```{r}
+ypred.log.ridge <- rowSums(ridge.model$coef * data2.test)
+ypred.ridge <- exp(ypred.log.ridge * y.scale + y.center) 
+res.ridge <- y.log.test - ypred.log.ridge
+mse.ridge <- mean(res.ridge^2)
+mse.ridge
+
+ggplot(data.frame(res.ridge, 1:100), aes(x = 1:100, y=res.ridge)) +
+  geom_point(size=3, shape=21, color = "red") +
+  ggtitle("The residuals of test set using ridge")
+
+```
+
+
+
+# 拓展
+
+## Resample
+
+首先，在前面的报告中，可以看到我们并没有一次性将所有数据全部用于训练模型，因为否则我们将没有数据对我们的模型进行验证，从而评估模型的效果。前面的报告中，我们采用了一种最简单、也是最容易想到的方法，就是将整个数据集分成两部分，一部分用于训练，一部分用于验证，也就是训练集和测试集。
+
+但是这种方法有两个弊端：首先是模型和参数的选择将很大依赖于对训练集和测试集的划分方法；此外，只使用了一部分数据进行模型的训练，而数据量越大模型效果通常会更好，所以模型的效果会受到一定的影响。
+
+下面我们采用两种resample的方法，可以在一定程度上解决这个问题。
+
+### Boostrap
+
+Boostrap是一种resample的方法，用于通过对替换的数据集进行重复多次采样来估计总体的统计数据，如均值、标准差，或者是总体的分布。
+
+其实现的方式是这样子的：从训练集中有放回的均匀抽样，每个样本可以得到一个估计，这样一来，可以得到$n$个估计，也就可以估计出总体的分布。
+
+```{r}
+set.seed(123)
+
+yname <- "z"
+varnameList <- names(step.model$coefficients[-1])
+formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+formu
+
+getRegr <- function(data, idx) {
+  yname <- "z"
+  varnameList <- names(step.model$coefficients[-1])
+  formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+  bsFit <- lm(formu, subset=idx, data=data)
+  coef(bsFit)
+}
+
+nR <- 1000
+ols.model.boot <- boot(data3.trans, statistic=getRegr, R=nR)
+ols.model.boot
+
+par(mfrow = c(2,4))
+for (i in 1:7){
+  hist(ols.model.boot$t[,i], breaks = 100, main = varnameList[i])
+}
+```
+
+
+
+### Cross-Validation
+
+为了解决上述问题，有人提出了Cross-Validation的方法。这是一种将样本数据切割成较小子集的方法，在部分子集中进行训练分析，其他子集则用来确认和验证，循环地将所有子集分析，可以得到一个较为稳健的估计。
+
+#### Leave-One-Out Cross-Validation
+
+Leave-One-Out Cross-Validation(LOOCV)方法，也继承了上面的思路，但是不同的是，只用一个数据集作为验证集，其他数据作为训练集，并将此步骤重复N次（N为数据集的数量）。而最终的test均方误差就是这N次训练结果的平均值。
+$$
+CV_{(n)} = \frac{1}{n}\sum_{i = 1}^{n}MSE_i
+$$
+
+```{r}
+set.seed(123)
+yname <- "z"
+varnameList <- names(step.model$coefficients[-1])
+formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+
+ols.fit <- glm(formu, data = data3.trans)
+cv.err <- cv.glm(data3.trans, ols.fit)
+cv.err$delta
+```
+
+#### K-fold Cross-Validation
+
+另一种方法叫做K-fold Cross-Validation，与LOOCV不同的是，每次的测试集不再只包含一个数据，而是k个数据，比如k = 10，那么我们利用10-fold交叉验证的步骤，先将所有数据集分为10份，不重复地每次选取其中1份作为验证集，其他9份作为训练集训练模型，之后计算在该测试集的均方误差，最终将10次均方误差取评价。
+$$
+CV_{(k)} = \frac{1}{k}\sum_{i = 1}^{k}MSE_i
+$$
+不难看出，LOOCV是一种特殊的K-fold Cross-Validation（K = 1）。
+
+```{r}
+set.seed(123)
+yname <- "z"
+varnameList <- names(step.model$coefficients[-1])
+formu <- as.formula(paste(yname, paste("~", paste(varnameList, collapse = "+"))))
+
+ols.fit <- glm(formu, data = data3.trans)
+cv.err <- cv.glm(data3.trans, ols.fit, K = 10)
+cv.err$delta
+```
+
+## Lasso, Ridge and Elastic net
+
+线性回归的最小二乘法，是为了使得目标函数最小化，即
+$$
+\min_\beta\{||Y-X\beta||^2\}
+$$
+
+Lasso, Ridge and Elastic net这三个方法都是在回归过程中防止过拟合的出现的方法，在目标函数后添加正则项因子，
+其中Lasso是使用$L1-norm$正则因子，即
+$$
+\min_\beta\{||Y-X\beta||^2 + \lambda ||\beta||_1\},\quad where\ ||\beta||_1 = \sum_i|\beta_i|,
+$$
+
+Ridge是使用$L2-norm$正则因子，即
+$$
+\min_\beta\{||Y-X\beta||^2 + \lambda ||\beta||_2\},\quad where\ ||\beta||_2 = \sum_i\beta_i^2,
+$$
+
+而Elastic net则是$L1-norm$和$L2-norm$的结合，即
+$$
+\min_\beta\{||Y-X\beta||^2 + \lambda[\alpha||\beta||_1 + (1-\alpha) ||\beta||_2 ] \}.
+$$
+
+下面将结合这三种方法和Cross-Validation的方法进行分析。
+
+### 训练模型
+我们使用的是glmnet这个包中的glmnet函数，其中的alpha参数也就是上述Elastic net中的$\alpha$。注意到$\alpha = 1$是Lasso模型，$\alpha = 0$是Ridge模型。
+```{r}
+x.train <- as.matrix(data3.trans[-1])
+y.train <- as.matrix(data3.trans[1])
+fit.lasso <- glmnet(x.train, y.train, family="gaussian", alpha=1)
+fit.ridge <- glmnet(x.train, y.train, family="gaussian", alpha=0)
+fit.elnet <- glmnet(x.train, y.train, family="gaussian", alpha=.5)
+
+# Plot solution paths:
+par(mfrow=c(3,1))
+plot(fit.lasso, xvar="lambda", main="LASSO")
+plot(fit.ridge, xvar="lambda", main="Ridge")
+plot(fit.elnet, xvar="lambda", main="Elastic Net")
+```
+
+下面使用10-Fold Cross-Validation对$\alpha = 0, 0.1, \dots, 0.9, 1.0$进行分析。
+```{r}
+set.seed(123)
+
+for (i in 0:10) {
+  assign(paste("fit", i, sep=""), cv.glmnet(x.train, y.train,   type.measure="mse",  alpha=i/10,family="gaussian"))
+}
+
+par(mfrow=c(3,2))
+
+plot(fit.lasso, xvar="lambda")
+plot(fit10, main="LASSO")
+
+plot(fit.ridge, xvar="lambda")
+plot(fit0, main="Ridge")
+
+plot(fit.elnet, xvar="lambda")
+plot(fit5, main="Elastic Net")
+```
+
+### 预测
+```{r}
+x.test <- as.matrix(data2.test)
+y.test <- data.test$price
+y.log.test <- (log(y.test) - y.center) / y.scale
+
+yhat0 <- predict(fit0, s=fit0$lambda.1se, newx=x.test)
+yhat1 <- predict(fit1, s=fit1$lambda.1se, newx=x.test)
+yhat2 <- predict(fit2, s=fit2$lambda.1se, newx=x.test)
+yhat3 <- predict(fit3, s=fit3$lambda.1se, newx=x.test)
+yhat4 <- predict(fit4, s=fit4$lambda.1se, newx=x.test)
+yhat5 <- predict(fit5, s=fit5$lambda.1se, newx=x.test)
+yhat6 <- predict(fit6, s=fit6$lambda.1se, newx=x.test)
+yhat7 <- predict(fit7, s=fit7$lambda.1se, newx=x.test)
+yhat8 <- predict(fit8, s=fit8$lambda.1se, newx=x.test)
+yhat9 <- predict(fit9, s=fit9$lambda.1se, newx=x.test)
+yhat10 <- predict(fit10, s=fit10$lambda.1se, newx=x.test)
+
+mse0 <- mean((y.log.test - yhat0)^2)
+mse1 <- mean((y.log.test - yhat1)^2)
+mse2 <- mean((y.log.test - yhat2)^2)
+mse3 <- mean((y.log.test - yhat3)^2)
+mse4 <- mean((y.log.test - yhat4)^2)
+mse5 <- mean((y.log.test - yhat5)^2)
+mse6 <- mean((y.log.test - yhat6)^2)
+mse7 <- mean((y.log.test - yhat7)^2)
+mse8 <- mean((y.log.test - yhat8)^2)
+mse9 <- mean((y.log.test - yhat9)^2)
+mse10 <- mean((y.log.test - yhat10)^2)
+
+mse_1 = c(mse0,mse1,mse2,mse3,mse4,mse5,mse6,mse7,mse8,mse9,mse10)
+plot(mse_1)
+```
+
+我们可以看到，当$\alpha = 0.7$的时候，均方误差最小。
+```{r}
+which(mse_1 == min(mse_1))
+```

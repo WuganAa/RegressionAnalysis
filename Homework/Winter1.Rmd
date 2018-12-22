@@ -1,0 +1,315 @@
+---
+title: "Winter1 冬第1周上机内容"
+author: "ChenXG 陈栩淦 3160104014"
+date: "12/17/2018"
+output: html_document
+---
+
+
+```{r}
+Sys.setlocale("LC_ALL", locale = "en_US.UTF-8")
+setwd("~/Project/RegressionAnalysis")
+```
+
+```{r}
+library(PerformanceAnalytics)  # for kurtosis and skewneww
+library(DAAG)  # for vif, eigen and kappa
+library(MASS)  # for lm.ridge
+
+# get descriptive statistics
+decribeStats <- function(x){
+  name <- c("mean", "Std", "Kurtosis", "Skewness", "Max", "Min", "Median")
+  data_decribe <- c(mean(x), sd(x), kurtosis(x), skewness(x), 
+                    max(x), min(x), median(x))
+  names(data_decribe) <- name
+  
+  return (data_decribe)
+}
+```
+
+
+## 题1
+
+10次试验得观测数据如下。
+若以$x_1, x_2$为回归自变量，问它们之间是否存在多重共线性关系？
+
+
+```{r}
+# loading data
+y <- c(16.3, 16.8, 19.2, 18.0, 19.5,
+         20.9, 21.1, 20.9, 20.3, 22.0)
+x1 <- c(1.1, 1.4, 1.7, 1.7, 1.8,
+          1.8, 1.9, 2.0, 2.3, 2.4)
+x2 <- c(1.1, 1.5, 1.8, 1.7, 1.9, 
+          1.8, 1.8, 2.1, 2.4, 2.5)
+
+data <- data.frame(y, x1, x2)
+```
+
+
+
+```{r}
+dS_x1 <- decribeStats(x1)
+dS_x2 <- decribeStats(x2)
+dS <- data.frame(dS_x1, dS_x2)
+dS
+```
+
+```{r}
+lm.sol <- lm(y~., data = data)
+summary(lm.sol)
+lm.sol$coefficients
+```
+
+
+
+
+我们可以得到回归方程：
+\begin{equation}
+y =  11.30730\times x_1 -6.59068 \times x_2 +  11.29244.
+\end{equation}
+
+
+
+```{r}
+X <- cbind(x1, x2)
+rho <- cor(X)
+rho
+```
+简单地，通过$x_1$和$x_2$的样本相关系数矩阵可以看出，它们之间存在高度的相关性。
+
+### 多重共线性诊断
+
+下面我们做多重共线性诊断。
+```{r}
+# VIF
+vif(lm.sol)
+```
+
+可以看到两个自变量的VIF值都大于10，因此存在着严重的多重共线性。
+
+```{r}
+# 特征根诊断法
+eigen(rho)
+```
+
+再看特征根诊断法，其中有1个特征根近似为零，则有1个多重共线性关系。
+
+```{r}
+# 条件数诊断法
+kappa(rho, exact = TRUE)
+```
+
+最后看条件数诊断法，CI在100～1000之间，则可以认为有着较强的多重共线性。
+
+* 结论：$x_1$和$x_2$存在着较强的多重共线性。
+
+
+## 题2
+
+10次试验得观测数据如下。
+试用岭迹法求$y$关于$x_1, x_2$得岭回归方程，并画出岭迹图。
+
+### 岭估计方法
+基于**题1**的结果，我们可以知道，$x_1$和$x_2$存在着较强的多重共线性。
+下面我们用岭估计的方法寻找岭回归方程。
+
+```{r}
+datascale <- scale(data)
+datascale
+
+data2 <- data.frame(datascale)
+data2
+```
+
+
+```{r}
+rr.sol <- lm.ridge(y~0+x1+x2, data = data2, 
+                   lambda = c(seq(0, 0.01, by = 0.0001), 
+                              seq(0.02, 0.1, by = 0.01),
+                              seq(0.2, 1, by = 0.1)))
+rr.sol
+
+plot(rr.sol)
+matplot(rr.sol$lambda, t(rr.sol$coef), type = "l", col = c("red", "blue", "black"),
+        main = "ridge trace", xlab = expression(lambda), ylab = expression(hat(beta)(lambda)))
+```
+
+
+根据岭迹图选择岭参数**k = 0.6**，则标准化变量的岭回归方程为
+$$
+\hat{v} = 0.7634318 \times x_1 + 0.07040598 \times x_2.
+$$
+
+```{r}
+attr(datascale,"scaled:center")
+
+attr(datascale, "scaled:scale")
+```
+
+转化成原始变量的岭回归方程：
+$$
+\frac{\hat{y} - 19.50}{1.9218047} = 0.7634318 \times \frac{x_1 - 1.81}{0.3842742} + 0.07040598 \times \frac{x_2 - 1.86}{0.4087923},
+$$
+
+即：
+$$
+\hat{y} = 3.818021 \times x_1 + 0.3309909 \times x_2  + 11.97395.
+$$
+
+
+
+## 题3
+
+对某种商品的销量$y$进行调查，并考虑有关的四个因素：$x_1$表示居民可支配收入，$x_2$表示该商品的平均价格指数，$x_3$表示该商品的社会保有量，$x_4$表示其他消费品平均价格指数。下面是调查数据。利用主成分方法建立$y$与$x_1, x_2, x_3, x_4$的回归方程。
+
+
+```{r}
+y <- c(8.4, 9.6, 10.4, 10.4, 12.2, 14.2, 15.8, 17.9, 19.6, 20.8)
+x1 <- c(82.9, 88.0, 99.9, 105.3, 117.7, 131.0, 148.2, 161.8, 174.2, 184.7)
+x2 <- c(92.0, 93.0, 96.0, 94.0, 100.0, 101.0, 105.0, 112.0, 112.0, 112.0)
+x3 <- c(17.1, 21.3, 25.1, 29.0, 34.0, 40.0, 44.0, 49.0, 51.0, 53.0)
+x4 <- c(94.0, 96.0, 97.0, 97.0, 100.0, 101.0, 104.0, 109.0, 111.0, 111.0)
+
+data <- data.frame(y, x1, x2, x3, x4)
+```
+
+```{r}
+lm.sol <- lm(y~., data = data)
+summary(lm.sol)
+lm.sol$coefficients
+```
+
+
+### 多重共线性诊断
+
+```{r}
+X <- cbind(x1, x2, x3, x4)
+rho <- cor(X)
+rho
+```
+通过样本相关系数矩阵可以直观看出，它们之间存在高度的相关性。
+
+
+```{r}
+# VIF
+vif(lm.sol)
+```
+可以看到四个自变量的VIF值都大于10，因此存在着严重的多重共线性。
+
+
+```{r}
+# 特征根诊断法
+eigen(rho)
+```
+根据特征根诊断法，其中有3个特征根近似为零，则有3个多重共线性关系。
+
+
+```{r}
+# 条件数诊断法
+kappa(rho, exact = TRUE)
+```
+通过条件数诊断法，CI大于1000，则可以认为有着严重的多重共线性。
+
+### 主成分方法
+
+为了消除多重共线性的影响，做主成分回归：
+
+```{r}
+datascale <- scale(data)
+datascale
+
+data2 <- data.frame(datascale)
+data2
+```
+
+
+```{r}
+y.pr <- princomp(~x1+x2+x3+x4, data = data2, cor = TRUE)
+summary(y.pr, loadings = TRUE)
+```
+
+容易看到，后三个特征根分别为
+$$
+\lambda_2 = 0.199906992^2 = 0.03996281 \approx 0, \\
+\lambda_3 = 0.11218966^2 = 0.01258652 \approx 0, \\
+\lambda_4 = 0.0603085506^2 = 0.003637121 \approx 0.
+$$
+
+并且第一个特征根的累计贡献率为$0.9859534 > 0.85$，所以我们只保留第一个主成分，删去后三个主成分。
+
+第一个主成分对应的标准正交化特征向量为
+$$
+\phi_1 = (0.502, 0.500, 0.498, 0.501)^{'},
+$$
+对应的主成分为
+$$
+z_1 = 0.502 \times x^*_1 + 0.500\times x^*_2 + 0.498 \times x^*_3 + 0.501 \times x ^*_4 .
+$$
+
+计算主成分得分：
+
+```{r}
+pre = predict(y.pr)
+pre
+```
+
+进行主成分估计：
+```{r}
+z1 = pre[,1]
+ys <- data2$y
+data3 <- data.frame(ys, z1)
+
+pc.sol <- lm(ys~0+z1, data = data3)
+summary(pc.sol)
+```
+
+可以得到主成分回归方程：
+\begin{align}
+\hat{u} & = 0.47515 \times z_1 \\
+& = 0.47515 \times (0.502 \times x^*_1 + 0.500\times x^*_2 + 0.498 \times x^*_3 + 0.501 \times x ^*_4) \\
+& = 0.2385253 \times x^*_1 + 0.237575 \times x^*_2 + 0.2366247 \times x^*_3 + 0.2380502 \times x^*_4.
+\end{align}
+
+```{r}
+attr(datascale,"scaled:center")
+
+attr(datascale, "scaled:scale")
+```
+
+
+转化成原始变量的回归方程，得到：
+
+\begin{align}
+\frac{\hat{y} - 13.93} {4.421174} & = 0.2385253 \times \frac{x_1 - 129.37}{36.415871} + 0.237575 \times \frac{x_2 - 101.70}{8.124722} \\ 
+& + 0.2366247 \times \frac{x_3 - 36.35}{12.939539} + 0.2380502 \times \frac{x_4 - 102.00}{6.411795},
+\end{align}
+
+即
+$$
+\hat{y} = 0.02895885 \times x_1 + 0.1292796 \times x_2 + 0.08084979\times x_3 + 0.1641446 \times x_4 -22.64578.
+$$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

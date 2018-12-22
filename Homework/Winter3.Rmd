@@ -1,0 +1,134 @@
+---
+title: "Winter3 冬第3周上机内容"
+author: "ChenXG 陈栩淦 3160104014"
+date: "12/18/2018"
+output: html_document
+---
+
+
+```{r}
+Sys.setlocale("LC_ALL", locale = "en_US.UTF-8")
+setwd("~/Project/RegressionAnalysis")
+```
+
+```{r}
+library(car)  # for outlierTest
+```
+
+
+## 题目
+
+河流的一个断面的年径流量$y$，该断面的上流流域的年平均降水量$x_1$，年平均饱和差$x_2$，现共有14年的记录。
+
+```{r}
+y <- c(290, 135, 234, 182, 145, 69, 205, 
+       151, 131, 106, 200, 224, 271, 130)
+x1 <- c(720, 553, 575, 548, 572, 453, 540, 
+        579, 515, 576, 547, 568, 720, 700)
+x2 <- c(1.80, 2.67, 1.75, 2.07, 2.49, 3.59, 1.88,
+        2.22, 2.41, 3.03, 1.83, 1.900, 1.98, 2.90)
+
+data <- data.frame(y, x1, x2)
+
+datascale <- scale(data)
+datascale
+
+data2 <- data.frame(datascale)
+```
+
+## 检验有无异常点
+
+```{r}
+lm.sol <- lm(y~., data = data2)
+summary(lm.sol)
+
+y.fit <- predict(lm.sol)
+e.hat <- residuals(lm.sol)
+e.std <- rstandard(lm.sol)
+h.x <- matrix(c(rep(1, 14), x1, x2), 14, 3, byrow = F)
+h.value <- hat(h.x)
+n <- 14
+p <- 2
+t <- sqrt((n - p - 2) / (n - p - 1 - e.std ^ 2)) * e.std
+resutls <- data.frame(y, y.fit, e.hat, h.value, e.std, t)
+resutls
+```
+
+因为$n - p - 2 = 10, t_0.05(10) = 1.812461$， 而$|t_6| = 4.06225470 > 1.812461$，所以我们认为第6号数据为异常点。
+
+下面的$outlierTest$函数也可以直接给出答案。
+
+
+```{r}
+outlierTest(lm.sol)
+```
+
+
+我们可以看到，第6号数据为异常点。
+
+
+## 对回归方程的显著性作检验（显著性水平$\alpha = 0.05$）
+
+我们排除第6号数据异常点，重新进行回归。
+
+```{r}
+data3 <- data[-6,]
+
+datascale2 <- scale(data3)
+datascale2
+
+data4 <- data.frame(datascale2)
+data4
+```
+
+
+```{r}
+lm.sol2 <- lm(y~., data = data4)
+summary(lm.sol2)
+
+attr(datascale2,"scaled:center")
+attr(datascale2, "scaled:scale")
+```
+
+可以看到，$F_H = 82.73$, p值为$6.014\times 10 ^{-7} < 0.05$, 所以我们认为回归自变量对因变量有着显著的线性影响。标准化回归方程为
+$$
+\hat{v} = -2.001\times 10^{-6} + 0.4724 \times x_1^* - 0.8431 \times x_2^*,
+$$
+
+
+即
+
+$$
+\frac{\hat{y} - 184.923077}{58.0336993}  = -2.001\times 10^{-6} + 0.4724 \times\frac{x_1 - 593.307692}{70.8371191} -  0.8431 \times \frac{x_2 - 2.225385}{0.4356148},
+$$
+
+即
+
+$$
+\hat{y} = 0.3870163 \times x_1 - 112.3199*\times x_2 + 205.2582.
+$$
+
+
+## 对每一个回归系数的显著性作检验（显著性水平$\alpha = 0.05$）
+
+
+```{r}
+summary(lm.sol2)
+```
+
+因为$p_1 < 0.05, p_2 < 0.05$，所以我们拒绝$H_1: \beta_1  = 0$和$H_2: \beta_2 = 0$。原来的回归模型可以不用修改。
+
+
+## 设某年$x_1 = 600, x_2 = 2.50$，求$y$的概率为0.95的预测区间
+
+```{r}
+new <- data.frame(x1 = 600, x2 = 2.50)
+lm.pred <- predict(lm.sol2, new, interval = "prediction", level = 0.95)
+lm.pred
+```
+
+可以得到，$y$的概率为0.95的预测区间为$[180.3736, 382.2576]$.
+
+
+
+
