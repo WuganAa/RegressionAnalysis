@@ -1,7 +1,0 @@
-install.packages("ISLR")
-library(ISLR)
-fix(Auto)
-
-在这个数据集中，mpg(油耗)是因变量，其它为自变量。目标是分析mpg与其它变量之间的依赖关系。
-
-可通过“?Auto”进一步了解该数据集的信息。

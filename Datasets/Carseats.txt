@@ -1,9 +1,0 @@
-install.packages("ISLR")
-library(ISLR)
-fix(Carseats)
-
-这个数据集收集了400家不同商店里的儿童汽车坐骑的销售数据。它含有10个自变量: CompPrice, Income, Advertising, Population, Price, ShelveLoc, Age, Education, Urban, US. 因变量是Sales(单位：千)，表示儿童汽车座椅的销量。可通过"?Carseats" 进一步了解该数据集的信息。
-
-在这个数据集里，可选任一目标进行数据分析：
-（1）分析sales与其它变量之间的依赖关系
-（2）定义一个定性变量High: High=1 如果 sales>8, 否则 High=0, 利用Logistic回归方法分析High与其它自变量之间的依赖关系。

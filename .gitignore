@@ -1,0 +1,9 @@
+
+# Myself:
+Datasets
+*.log
+*.aux
+*.out
+*.toc
+.Rhistory
+.DS_Store
